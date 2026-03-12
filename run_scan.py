@@ -192,6 +192,44 @@ async def run_scanners(target: str, scanner_names: list, timeout: int, threads: 
     }
     
     for name in scanner_names:
+        if name.lower().startswith("vortex"):
+            from engine.vapex import run_vortex
+            print(f"\n[+] Launching Vortex Explorer (PayloadsAllTheThings)...")
+            
+            category = None
+            if ":" in name: # e.g. -s vortex:49
+                parts = name.split(":")
+                if len(parts) > 1:
+                    category = parts[1]
+            
+            if not category:
+                # Fallback to interactive selection if it's just 'vortex'
+                # but since this is an async loop, we should handle it carefully.
+                # For now, let's assume we want to ask if it's the only scanner or if it's clear.
+                import os
+                from engine.vapex import VortexExplorer
+                explorer = VortexExplorer()
+                explorer.list_categories()
+                try:
+                    category_input = input("Select Vortex Category (Number or Name): ").strip()
+                    if category_input.isdigit():
+                        idx = int(category_input) - 1
+                        if 0 <= idx < len(explorer.categories):
+                            category = sorted(explorer.categories)[idx]
+                    else:
+                        for cat in explorer.categories:
+                            if category_input.lower() in cat.lower():
+                                category = cat
+                                break
+                except EOFError:
+                    category = None
+
+            if category:
+                vortex_findings = await run_vortex(target, category)
+                all_findings.extend(vortex_findings)
+                modules_run.append(f"vortex:{category}")
+            continue
+
         scanner_class = scanner_suite.get(name.lower())
         if not scanner_class:
             print(f"[!] Unknown scanner: {name}")
@@ -220,7 +258,7 @@ async def run_scanners(target: str, scanner_names: list, timeout: int, threads: 
 async def main():
     parser = argparse.ArgumentParser(description="VAPTx Enterprise Multi-Scanner")
     parser.add_argument("target", help="Target URL (e.g., https://example.com)")
-    parser.add_argument("--scanner", "-s", default="all", help="Scanners: port,ssl,subdomain,dir,headers,fingerprint,all")
+    parser.add_argument("--scanner", "-s", default="all", help="Scanners: port,ssl,subdomain,dir,headers,fingerprint,vortex,all")
     parser.add_argument("--output", "-o", default=None, help="Output HTML report file")
     parser.add_argument("--threads", type=int, default=50, help="Concurrent threads")
     parser.add_argument("--timeout", type=int, default=10, help="Request timeout")

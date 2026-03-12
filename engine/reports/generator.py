@@ -30,7 +30,11 @@ class ReportGenerator:
         type_counts = {}
         
         for f in findings:
-            sev = str(f.get("severity", "info")).lower()
+            sev = f.get("severity", "info")
+            if hasattr(sev, "value"):
+                sev = sev.value
+            sev = str(sev).lower()
+            
             if sev in counts:
                 counts[sev] += 1
             else:
@@ -226,7 +230,11 @@ class ReportGenerator:
 
         html_parts = []
         for f in sorted_findings:
-            sev = str(f.get("severity", "info")).lower()
+            sev = f.get("severity", "info")
+            if hasattr(sev, "value"):
+                sev = sev.value
+            sev = str(sev).lower()
+            
             color_class = f"text-{sev}"
             border_class = f"border-l-2 border-{sev}"
             

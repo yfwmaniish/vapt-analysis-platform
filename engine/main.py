@@ -1,5 +1,5 @@
 """
-VAPTx — AI-Powered VAPT Security Platform
+SecureSuiteX — AI-Powered VAPT Security Platform
 
 Main FastAPI application entry point.
 """
@@ -34,6 +34,7 @@ import engine.scanners.session_scanner     # noqa: F401
 import engine.scanners.fingerprint_scanner # noqa: F401
 import engine.scanners.cors_scanner        # noqa: F401
 import engine.scanners.redirect_scanner    # noqa: F401
+import engine.scanners.vortex_scanner      # noqa: F401
 
 from engine.scanners.registry import ScannerRegistry
 

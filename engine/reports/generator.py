@@ -1,5 +1,7 @@
 """
-Professional HTML report generator for scan results with visualizations.
+VIPER-style cyberpunk HTML report generator for scan results.
+Matches the dashboard's dark neon aesthetic — CRT scanlines, cyber grid,
+glassmorphism cards, neon severity badges, monospace fonts.
 """
 
 from __future__ import annotations
@@ -12,11 +14,43 @@ from typing import Any, Dict, List
 from engine import config
 
 
-class ReportGenerator:
-    """Generate professional HTML reports from real scan results with visualizations."""
+# ── Neon Color Palette (matches globals.css) ──────────────────────────────
+COLORS = {
+    "bg_app": "#020205",
+    "bg_panel": "rgba(10, 10, 18, 0.6)",
+    "bg_element": "rgba(19, 19, 31, 0.8)",
+    "bg_card": "rgba(5, 5, 10, 0.4)",
+    "border_cyber": "rgba(0, 243, 255, 0.12)",
+    "border_cyber_hover": "rgba(0, 243, 255, 0.25)",
+    "text_primary": "#e2e8f0",
+    "text_secondary": "#94a3b8",
+    "neon_cyan": "#00f3ff",
+    "neon_blue": "#3b82f6",
+    "neon_green": "#00ff9f",
+    "neon_red": "#ff003c",
+    "neon_yellow": "#fcee0a",
+    "neon_purple": "#bc13fe",
+    "severity_critical": "#ff003c",
+    "severity_high": "#f97316",
+    "severity_medium": "#fcee0a",
+    "severity_low": "#00ff9f",
+    "severity_info": "#00f3ff",
+}
 
-    def generate_html(self, scan_result: Dict[str, Any], theme: str = "white") -> str:
-        """Generate a full HTML report using genuine scan data. Themes: 'dark', 'white'."""
+SEV_COLORS = {
+    "critical": COLORS["severity_critical"],
+    "high": COLORS["severity_high"],
+    "medium": COLORS["severity_medium"],
+    "low": COLORS["severity_low"],
+    "info": COLORS["severity_info"],
+}
+
+
+class ReportGenerator:
+    """Generate VIPER-themed cyberpunk HTML reports from real scan results."""
+
+    def generate_html(self, scan_result: Dict[str, Any], theme: str = "dark") -> str:
+        """Generate a full HTML report using genuine scan data."""
         target = scan_result.get("target", "Unknown")
         findings = scan_result.get("findings", [])
         ai_summary = scan_result.get("ai_summary", "")
@@ -25,319 +59,320 @@ class ReportGenerator:
         scan_id = scan_result.get("scan_id", "")
         modules_run = scan_result.get("modules_run", [])
 
-        # Process real data for visualizations
+        # ── Aggregate data ────────────────────────────────────────
         counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-        type_counts = {}
-        
+        type_counts: Dict[str, int] = {}
+
         for f in findings:
-            sev = f.get("severity", "info")
-            if hasattr(sev, "value"):
-                sev = sev.value
-            sev = str(sev).lower()
-            
-            if sev in counts:
-                counts[sev] += 1
-            else:
-                counts["info"] += 1
-                
-            f_type = f.get("scanner", "Unknown")
-            type_counts[f_type] = type_counts.get(f_type, 0) + 1
+            sev = self._normalize_severity(f.get("severity", "info"))
+            counts[sev] = counts.get(sev, 0) + 1
+            scanner = f.get("scanner", "Unknown")
+            type_counts[scanner] = type_counts.get(scanner, 0) + 1
 
-        severity_data = [counts["critical"], counts["high"], counts["medium"], counts["low"], counts["info"]]
-        module_labels = list(type_counts.keys())
-        module_data = list(type_counts.values())
+        total_findings = len(findings)
+        severity_data = json.dumps([counts[k] for k in ("critical", "high", "medium", "low", "info")])
+        module_labels = json.dumps(list(type_counts.keys()))
+        module_data = json.dumps(list(type_counts.values()))
 
-        # Render sections
-        findings_html = self._render_findings(findings, theme)
-        ai_html = self._render_ai_summary(ai_summary, theme) if ai_summary else ""
-        
-        # Inject JSON safely into JS
-        sev_data_json = json.dumps(severity_data)
-        mod_labels_json = json.dumps(module_labels)
-        mod_data_json = json.dumps(module_data)
+        # ── Render sub-sections ───────────────────────────────────
+        metrics_html = self._render_metrics(counts, duration, len(modules_run), total_findings)
+        ai_html = self._render_ai_summary(ai_summary) if ai_summary else ""
+        owasp_html = self._render_owasp_heatmap(findings)
+        attack_surface_html = self._render_attack_surface(scan_result.get("attack_surface", {})) if scan_result.get("attack_surface") else ""
+        findings_html = self._render_findings(findings)
 
-        # Theme Configuration
-        is_dark = theme == "dark"
-        bg_color = "#030712" if is_dark else "#ffffff"
-        card_bg = "rgba(31, 41, 55, 0.4)" if is_dark else "#f8fafc"
-        card_border = "rgba(255,255,255,0.05)" if is_dark else "#e2e8f0"
-        title_color = "text-white" if is_dark else "text-slate-900"
-        muted_color = "text-gray-400" if is_dark else "text-slate-500"
-        
-        modules_list_html = "".join([f'<span class="px-2 py-0.5 {"bg-gray-900 border-gray-700 text-gray-300" if is_dark else "bg-white border-slate-200 text-slate-600"} border rounded text-[10px] font-mono">{html.escape(m)}</span>' for m in modules_run])
+        modules_badges = "".join(
+            f'<span class="mod-badge">{html.escape(m)}</span>' for m in modules_run
+        )
 
-        # Render AI summary if present
-        ai_summary_html = ""
-        if scan_result.get("ai_summary"):
-            ai_summary_html = self._render_ai_summary(scan_result["ai_summary"], theme)
-
-        # Render Attack Surface Inventory
-        attack_surface_html = ""
-        if scan_result.get("attack_surface"):
-            attack_surface_html = self._render_attack_surface(scan_result["attack_surface"], theme)
-
-        # Placeholder for other new variables introduced in the template
-        findings_count = len(findings)
-        metrics_html = self._render_metrics(counts, duration, len(modules_run), findings_count, theme) # Assuming a new method for metrics
-        owasp_heatmap_html = self._render_owasp_heatmap(findings, theme)
-        desc_color = "text-gray-300" if is_dark else "text-slate-600" # Defined here as it's used in the new template
-
-        # Full HTML structure
-        html_template = f"""<!DOCTYPE html>
-<html lang="en" class="{theme}">
+        return f"""<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VAPTx Security Report — {html.escape(target)}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>SecureSuiteX Security Report — {html.escape(target)}</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {{
-            darkMode: 'class',
-            theme: {{
-                extend: {{
-                    fontFamily: {{ sans: ['"Plus Jakarta Sans"', 'Inter', 'sans-serif'] }},
-                    colors: {{
-                        gray: {{ 850: '#1f2937', 900: '#111827', 950: '#030712' }},
-                        critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e', info: '#3b82f6',
-                        brand: {{
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0ea5e9',
-                            600: '#0284c7',
-                            700: '#0369a1',
-                        }}
-                    }}
-                }}
-            }}
-        }}
-    </script>
-    <style>
-        {self._get_css(theme)}
-    </style>
+    <style>{self._get_css()}</style>
 </head>
-<body class="bg-page min-h-screen pb-20">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        <!-- Header -->
-        <header class="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
-            <div>
-                <div class="flex items-center gap-2 mb-2">
-                    <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest uppercase bg-brand-500 text-white">VAPTx Engine</span>
-                    <span class="text-xs {muted_color}">v3.2.0 Professional</span>
+<body>
+    <!-- CRT Scanline Overlay -->
+    <div class="crt-overlay"></div>
+    <div class="cyber-grid"></div>
+
+    <div class="report-container">
+        <!-- ═══ HEADER ═══ -->
+        <header class="report-header">
+            <div class="header-left">
+                <div class="brand-row">
+                    <span class="brand-badge">SecureSuiteX ENGINE</span>
+                    <span class="brand-version">v3.2.0 • CLASSIFIED</span>
                 </div>
-                <h1 class="text-3xl font-extrabold tracking-tight {title_color}">
-                    Security Audit <span class="text-brand-500">Report</span>
+                <h1 class="report-title">
+                    SECURITY AUDIT <span class="title-accent">REPORT</span>
                 </h1>
-                <p class="mt-1 text-sm {desc_color}">Generated for target: <code class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-brand-600 font-medium">{target}</code></p>
-            </div>
-            
-            <div class="flex items-center gap-3">
-                <div class="text-right hidden sm:block">
-                    <p class="text-[10px] uppercase tracking-wider font-bold {muted_color}">Audit Date</p>
-                    <p class="text-sm font-semibold {title_color}">{created_at}</p>
+                <div class="target-row">
+                    <span class="target-label">TARGET:</span>
+                    <code class="target-url">{html.escape(target)}</code>
                 </div>
-                <div class="h-10 w-[1px] bg-slate-200 dark:bg-slate-700 mx-2 hidden sm:block"></div>
-                <div class="flex flex-col items-center justify-center h-12 w-12 rounded-xl bg-brand-500 text-white shadow-lg shadow-brand-500/20">
-                    <span class="text-xs font-bold leading-none">{findings_count}</span>
-                    <span class="text-[8px] uppercase tracking-tighter">Issues</span>
+                <div class="modules-row">
+                    <span class="target-label">ENGINES:</span>
+                    {modules_badges}
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="header-stat">
+                    <span class="stat-label">AUDIT DATE</span>
+                    <span class="stat-value">{created_at}</span>
+                </div>
+                <div class="header-stat">
+                    <span class="stat-label">DURATION</span>
+                    <span class="stat-value">{duration:.1f}s</span>
+                </div>
+                <div class="findings-count-box">
+                    <span class="findings-count-num">{total_findings}</span>
+                    <span class="findings-count-label">ISSUES</span>
                 </div>
             </div>
         </header>
 
+        <!-- ═══ SEVERITY METRICS ═══ -->
         {metrics_html}
 
-        <!-- Visuals -->
-        <section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            <div class="glass card">
-                <h2 class="text-[10px] font-black uppercase tracking-widest mb-4 {title_color} opacity-60">Severity Distribution</h2>
-                <div class="relative h-44 w-full flex justify-center"><canvas id="severityChart"></canvas></div>
+        <!-- ═══ CHARTS ═══ -->
+        <section class="charts-grid">
+            <div class="cyber-card">
+                <h2 class="section-label">SEVERITY_DISTRIBUTION</h2>
+                <div class="chart-container"><canvas id="severityChart"></canvas></div>
             </div>
-            <div class="glass card">
-                <h2 class="text-[10px] font-black uppercase tracking-widest mb-4 {title_color} opacity-60">Engine Performance</h2>
-                <div class="relative h-44 w-full flex justify-center"><canvas id="moduleChart"></canvas></div>
+            <div class="cyber-card">
+                <h2 class="section-label">ENGINE_PERFORMANCE</h2>
+                <div class="chart-container"><canvas id="moduleChart"></canvas></div>
             </div>
         </section>
 
-        {ai_summary_html}
-        {owasp_heatmap_html}
+        {ai_html}
+        {owasp_html}
         {attack_surface_html}
 
-        <!-- Findings -->
-        <section class="mt-8 print-break">
-            <h2 class="text-xs font-black uppercase tracking-widest mb-6 {title_color} border-b border-gray-500/10 pb-3 flex items-center justify-between">
-                <span>Detailed Findings Registry</span>
-                <span class="text-[9px] bg-indigo-600 text-white px-3 py-1 rounded-full">{len(findings)} TOTAL</span>
-            </h2>
-            <div class="space-y-4">{findings_html}</div>
+        <!-- ═══ FINDINGS ═══ -->
+        <section class="findings-section">
+            <div class="section-header">
+                <h2 class="section-label">DETAILED_FINDINGS_REGISTRY</h2>
+                <span class="findings-total-badge">{total_findings} TOTAL</span>
+            </div>
+            <div class="findings-list">{findings_html}</div>
         </section>
 
-        <footer class="mt-16 text-center text-[9px] font-bold {muted_color} pb-12 uppercase tracking-widest border-t border-gray-500/10 pt-8">
-            <p>VAPTx AI Security Engine • Confidential Threat Intelligence</p>
-            <p class="mt-2 opacity-50 font-mono tracking-tighter">Report ID: {scan_id}</p>
+        <!-- ═══ FOOTER ═══ -->
+        <footer class="report-footer">
+            <div class="footer-line"></div>
+            <p class="footer-brand">SecureSuiteX AI SECURITY ENGINE • CONFIDENTIAL THREAT INTELLIGENCE</p>
+            <p class="footer-copyright">&copy; 2026 Veltro. All rights reserved.</p>
+            <p class="footer-id">REPORT_ID: {scan_id}</p>
         </footer>
     </div>
 
     <script>
-        const isDark = {str(is_dark).lower()};
-        const fontColor = isDark ? '#9ca3af' : '#64748b';
-        const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
-        
-        Chart.defaults.color = fontColor;
-        Chart.defaults.font.family = '"Plus Jakarta Sans", sans-serif';
+        Chart.defaults.color = '{COLORS["text_secondary"]}';
+        Chart.defaults.font.family = '"JetBrains Mono", monospace';
+        Chart.defaults.font.size = 10;
 
         new Chart(document.getElementById('severityChart'), {{
             type: 'doughnut',
             data: {{
-                labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
+                labels: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'],
                 datasets: [{{
-                    data: {sev_data_json},
-                    backgroundColor: ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'],
+                    data: {severity_data},
+                    backgroundColor: ['{COLORS["severity_critical"]}', '{COLORS["severity_high"]}', '{COLORS["severity_medium"]}', '{COLORS["severity_low"]}', '{COLORS["severity_info"]}'],
                     borderWidth: 0,
-                    hoverOffset: 12
+                    hoverOffset: 8,
+                    borderRadius: 2
                 }}]
             }},
-            options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'right' }} }}, cutout: '80%' }}
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '78%',
+                plugins: {{
+                    legend: {{
+                        position: 'right',
+                        labels: {{
+                            usePointStyle: true,
+                            pointStyle: 'rectRounded',
+                            padding: 12,
+                            font: {{ family: '"JetBrains Mono"', size: 9, weight: '600' }}
+                        }}
+                    }}
+                }}
+            }}
         }});
 
         new Chart(document.getElementById('moduleChart'), {{
             type: 'bar',
             data: {{
-                labels: {mod_labels_json},
-                datasets: [{{ label: 'Findings', data: {mod_data_json}, backgroundColor: '#4f46e5', borderRadius: 2 }}]
+                labels: {module_labels},
+                datasets: [{{
+                    label: 'Findings',
+                    data: {module_data},
+                    backgroundColor: '{COLORS["neon_cyan"]}22',
+                    borderColor: '{COLORS["neon_cyan"]}',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    hoverBackgroundColor: '{COLORS["neon_cyan"]}44'
+                }}]
             }},
-            options: {{ responsive: true, maintainAspectRatio: false, scales: {{ y: {{ grid: {{ color: gridColor }} }}, x: {{ grid: {{ display: false }} }} }}, plugins: {{ legend: {{ display: false }} }} }}
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {{
+                    y: {{
+                        grid: {{ color: 'rgba(0, 243, 255, 0.05)' }},
+                        ticks: {{ font: {{ size: 9 }} }}
+                    }},
+                    x: {{
+                        grid: {{ display: false }},
+                        ticks: {{ font: {{ size: 8 }}, maxRotation: 45 }}
+                    }}
+                }},
+                plugins: {{ legend: {{ display: false }} }}
+            }}
         }});
     </script>
 </body>
 </html>"""
-        return html_template
 
-    def _render_findings(self, findings: List[Dict], theme: str) -> str:
-        is_dark = theme == "dark"
-        muted_color = "text-gray-400" if is_dark else "text-slate-500"
-        title_color = "text-white" if is_dark else "text-slate-900"
-        desc_color = "text-gray-300" if is_dark else "text-slate-600"
-        code_bg = "bg-gray-900 border-gray-800" if is_dark else "bg-slate-50 border-slate-200"
-        code_text = "text-gray-300" if is_dark else "text-slate-700"
+    # ══════════════════════════════════════════════════════════════
+    #  PRIVATE RENDER METHODS
+    # ══════════════════════════════════════════════════════════════
 
-        if not findings:
-            return f'<div class="glass card text-center py-10 {muted_color} text-xs font-bold uppercase tracking-widest">No vulnerabilities discovered during this scan.</div>'
+    def _normalize_severity(self, sev: Any) -> str:
+        """Normalize severity to lowercase string."""
+        if hasattr(sev, "value"):
+            sev = sev.value
+        sev = str(sev).lower()
+        return sev if sev in ("critical", "high", "medium", "low", "info") else "info"
 
-        # Sort findings: critical first, high, medium, low, info
-        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-        sorted_findings = sorted(findings, key=lambda x: severity_order.get(str(x.get("severity", "info")).lower(), 5))
-
-        html_parts = []
-        for f in sorted_findings:
-            sev = f.get("severity", "info")
-            if hasattr(sev, "value"):
-                sev = sev.value
-            sev = str(sev).lower()
-            
-            color_class = f"text-{sev}"
-            border_class = f"border-l-2 border-{sev}"
-            
-            cwe_id = f.get("cwe_id")
-            cwe_html = f'<span class="text-[9px] font-bold font-mono {code_bg} {code_text} px-1.5 py-0.5 rounded border">{html.escape(cwe_id)}</span>' if cwe_id else ''
-            
-            owasp = f.get("owasp_category")
-            owasp_html = f'<span class="text-[9px] font-bold font-mono bg-indigo-600/10 text-indigo-600 px-1.5 py-0.5 rounded border border-indigo-600/20 ml-1.5">{html.escape(owasp)}</span>' if owasp else ''
-            
-            cvss_score = f.get("cvss_score")
-            cvss_html = f'<span class="text-[9px] font-black bg-slate-900 text-white px-1.5 py-0.5 rounded ml-1.5">CVSS {float(cvss_score):.1f}</span>' if cvss_score else ''
-            
-            evidence = f.get("evidence", "")
-            evidence_html = f"""
-                <div class="mt-4">
-                    <h5 class="text-[9px] uppercase tracking-widest {muted_color} font-black mb-2">Technical Evidence</h5>
-                    <pre class="{code_bg} {code_text} p-3 rounded border overflow-x-auto text-[11px] font-mono leading-relaxed">{html.escape(str(evidence))}</pre>
+    def _render_metrics(self, counts: Dict[str, int], duration: float, modules: int, total: int) -> str:
+        """Render the severity metric cards row."""
+        cards = []
+        for sev in ("critical", "high", "medium", "low", "info"):
+            color = SEV_COLORS[sev]
+            count = counts.get(sev, 0)
+            cards.append(f"""
+                <div class="metric-card" style="border-bottom: 2px solid {color}">
+                    <span class="metric-label">{sev.upper()}</span>
+                    <span class="metric-value" style="color: {color}">{count}</span>
                 </div>
-            """ if evidence else ""
-
-            remediation = f.get("remediation", "")
-            rem_bg = "bg-emerald-500/5 border-emerald-500/10" if is_dark else "bg-emerald-50 border-emerald-100"
-            rem_text = "text-emerald-400" if is_dark else "text-emerald-700"
-            remediation_html = f"""
-                <div class="mt-4 {rem_bg} p-3 rounded border">
-                    <h5 class="text-[9px] uppercase tracking-widest {rem_text} font-black mb-1.5 flex items-center gap-1.5">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                        Remediation Plan
-                    </h5>
-                    <p class="{desc_color} text-xs font-medium leading-relaxed">{html.escape(str(remediation))}</p>
-                </div>
-            """ if remediation else ""
-            
-            location = f.get("location", "")
-            location_html = f'<div class="text-[10px] font-bold font-mono text-indigo-600 mt-2 break-all bg-indigo-50 inline-block px-2 py-0.5 rounded border border-indigo-100">{html.escape(str(location))}</div>' if location else ''
-
-            html_parts.append(f"""
-            <article class="glass card {border_class} relative group transition-all">
-                <div class="flex flex-col md:flex-row md:items-start justify-between gap-3">
-                    <div class="flex-1">
-                        <div class="flex items-center gap-2 mb-1.5">
-                            <span class="text-[9px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded {color_class} bg-white border border-current">{sev}</span>
-                            <span class="{muted_color} text-[10px] font-bold uppercase tracking-tight">{html.escape(f.get('type', 'Finding'))} • {html.escape(f.get('scanner', 'engine'))}</span>
-                        </div>
-                        <h3 class="text-sm font-black {title_color} leading-snug">{html.escape(f.get('title', 'Untitled Finding'))}</h3>
-                        {location_html}
-                    </div>
-                    <div class="flex items-center flex-wrap self-start shrink-0">
-                        {cwe_html}
-                        {owasp_html}
-                        {cvss_html}
-                    </div>
-                </div>
-                
-                <div class="mt-3 {desc_color} text-xs font-medium leading-relaxed max-w-4xl border-t border-gray-500/5 pt-3">
-                    {html.escape(f.get('description', ''))}
-                </div>
-                
-                {evidence_html}
-                {remediation_html}
-            </article>
             """)
-        return "\n".join(html_parts)
 
-    def _render_ai_summary(self, summary: str, theme: str) -> str:
-        is_dark = theme == "dark"
-        title_color = "text-white" if is_dark else "text-slate-900"
-        muted_color = "text-gray-400" if is_dark else "text-slate-500"
-        desc_color = "text-gray-300" if is_dark else "text-slate-600"
-        
-        # Format the markdown-like AI summary to simple HTML
-        formatted_summary = html.escape(summary).replace('\n', '<br>')
-        formatted_summary = re.sub(r'\*\*(.*?)\*\*', f'<strong class="{title_color}">\\1</strong>', formatted_summary)
-        formatted_summary = re.sub(r'\*(.*?)\*', f'<em class="{muted_color}">\\1</em>', formatted_summary)
-        
-        # Format list items
-        formatted_summary = re.sub(r'(\d+\.\s.*?)(<br>|$)', r'<li class="ml-4 mb-1">\1</li>', formatted_summary)
-        formatted_summary = re.sub(r'(-\s.*?)(<br>|$)', r'<li class="ml-4 mb-1">\1</li>', formatted_summary)
-        
         return f"""
-        <section class="glass card print-break relative overflow-hidden">
-            <div class="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
-            <div class="flex items-center gap-2 mb-4">
-                <div class="p-1.5 bg-indigo-600/10 rounded">
-                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                    </svg>
-                </div>
-                <h2 class="text-xs font-black uppercase tracking-widest {title_color}">AI Strategic Audit</h2>
+        <section class="metrics-grid">{"".join(cards)}</section>
+        <section class="cyber-card stats-bar">
+            <div class="stat-block">
+                <span class="stat-block-label">TIME_ELAPSED</span>
+                <span class="stat-block-value">{duration:.1f} seconds</span>
             </div>
-            <div class="{desc_color} text-xs leading-relaxed font-medium">
-                {formatted_summary}
+            <div class="stat-block">
+                <span class="stat-block-label">ENGINES_ACTIVE</span>
+                <span class="stat-block-value">{modules} modules</span>
+            </div>
+            <div class="stat-block">
+                <span class="stat-block-label">FINDINGS_DENSITY</span>
+                <span class="stat-block-value">{total} security items</span>
             </div>
         </section>
         """
 
-    def _render_owasp_heatmap(self, findings: List[Dict], theme: str) -> str:
-        """Render an OWASP Top 10 2025 compliance heatmap section."""
-        is_dark = theme == "dark"
-        title_color = "text-white" if is_dark else "text-slate-900"
-        muted_color = "text-gray-400" if is_dark else "text-slate-500"
-        border_color = "border-gray-800" if is_dark else "border-slate-200"
+    def _render_findings(self, findings: List[Dict]) -> str:
+        """Render the findings list with cyber-themed cards."""
+        if not findings:
+            return '<div class="cyber-card" style="text-align:center;padding:3rem"><span class="section-label">NO VULNERABILITIES DISCOVERED</span></div>'
 
+        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        sorted_findings = sorted(findings, key=lambda x: severity_order.get(self._normalize_severity(x.get("severity", "info")), 5))
+
+        parts = []
+        for f in sorted_findings:
+            sev = self._normalize_severity(f.get("severity", "info"))
+            color = SEV_COLORS[sev]
+
+            # Tags row
+            tags = []
+            cwe = f.get("cwe_id")
+            if cwe:
+                tags.append(f'<span class="tag tag-cwe">{html.escape(cwe)}</span>')
+            owasp = f.get("owasp_category")
+            if owasp:
+                tags.append(f'<span class="tag tag-owasp">{html.escape(owasp)}</span>')
+            cvss = f.get("cvss_score")
+            if cvss:
+                tags.append(f'<span class="tag tag-cvss">CVSS {float(cvss):.1f}</span>')
+            tags_html = "".join(tags)
+
+            # Location
+            location = f.get("location", "")
+            location_html = f'<div class="finding-location">{html.escape(str(location))}</div>' if location else ""
+
+            # Evidence
+            evidence = f.get("evidence", "")
+            evidence_html = f"""
+                <div class="finding-evidence">
+                    <h5 class="evidence-label">TECHNICAL_EVIDENCE</h5>
+                    <pre class="evidence-code">{html.escape(str(evidence))}</pre>
+                </div>
+            """ if evidence else ""
+
+            # Remediation
+            remediation = f.get("remediation", "")
+            remediation_html = f"""
+                <div class="finding-remediation">
+                    <h5 class="remediation-label">⚡ REMEDIATION_PLAN</h5>
+                    <p class="remediation-text">{html.escape(str(remediation))}</p>
+                </div>
+            """ if remediation else ""
+
+            parts.append(f"""
+            <article class="finding-card" style="border-left: 2px solid {color}">
+                <div class="finding-header">
+                    <div class="finding-header-left">
+                        <div class="finding-meta">
+                            <span class="sev-badge" style="color:{color};border-color:{color}">{sev.upper()}</span>
+                            <span class="scanner-label">{html.escape(f.get('type', 'Finding'))} • {html.escape(f.get('scanner', 'engine'))}</span>
+                        </div>
+                        <h3 class="finding-title">{html.escape(f.get('title', 'Untitled Finding'))}</h3>
+                        {location_html}
+                    </div>
+                    <div class="finding-tags">{tags_html}</div>
+                </div>
+                <div class="finding-desc">{html.escape(f.get('description', ''))}</div>
+                {evidence_html}
+                {remediation_html}
+            </article>
+            """)
+        return "\n".join(parts)
+
+    def _render_ai_summary(self, summary: str) -> str:
+        """Render the AI strategic audit section."""
+        formatted = html.escape(summary).replace('\n', '<br>')
+        formatted = re.sub(r'\*\*(.*?)\*\*', r'<strong class="text-highlight">\1</strong>', formatted)
+        formatted = re.sub(r'\*(.*?)\*', r'<em class="text-muted">\1</em>', formatted)
+        formatted = re.sub(r'(\d+\.\s.*?)(<br>|$)', r'<li class="ai-list-item">\1</li>', formatted)
+        formatted = re.sub(r'(-\s.*?)(<br>|$)', r'<li class="ai-list-item">\1</li>', formatted)
+
+        return f"""
+        <section class="cyber-card ai-section">
+            <div class="ai-accent-bar"></div>
+            <div class="section-header-inline">
+                <span class="section-icon">🧪</span>
+                <h2 class="section-label">AI_STRATEGIC_AUDIT</h2>
+            </div>
+            <div class="ai-content">{formatted}</div>
+        </section>
+        """
+
+    def _render_owasp_heatmap(self, findings: List[Dict]) -> str:
+        """Render OWASP Top 10 compliance matrix."""
         owasp_map = {
             "A01": {"name": "Broken Access Control", "findings": []},
             "A02": {"name": "Cryptographic Failures", "findings": []},
@@ -351,6 +386,8 @@ class ReportGenerator:
             "A10": {"name": "SSRF", "findings": []},
         }
 
+        weights = {"critical": 10, "high": 7, "medium": 4, "low": 1, "info": 0}
+
         for f in findings:
             owasp_cat = f.get("owasp_category", "")
             if owasp_cat:
@@ -358,16 +395,17 @@ class ReportGenerator:
                 if code in owasp_map:
                     owasp_map[code]["findings"].append(f)
 
-        # Calculate risk score (weighted severity)
-        weights = {"critical": 10, "high": 7, "medium": 4, "low": 1, "info": 0}
-        total_risk = sum(weights.get(str(f.get("severity", "info")).lower(), 0) for f in findings)
+        total_risk = sum(weights.get(self._normalize_severity(f.get("severity", "info")), 0) for f in findings)
         risk_pct = min(100, int((total_risk / max(len(findings) * 10, 1)) * 100))
 
-        risk_color = "#22c55e"
-        risk_label = "Healthy"
-        if risk_pct >= 70: risk_color, risk_label = "#ef4444", "Critical"
-        elif risk_pct >= 45: risk_color, risk_label = "#f97316", "High"
-        elif risk_pct >= 25: risk_color, risk_label = "#eab308", "Medium"
+        risk_color = COLORS["severity_low"]
+        risk_label = "SECURE"
+        if risk_pct >= 70:
+            risk_color, risk_label = COLORS["severity_critical"], "CRITICAL"
+        elif risk_pct >= 45:
+            risk_color, risk_label = COLORS["severity_high"], "HIGH_RISK"
+        elif risk_pct >= 25:
+            risk_color, risk_label = COLORS["severity_medium"], "ELEVATED"
 
         rows = []
         for code, data in owasp_map.items():
@@ -375,254 +413,511 @@ class ReportGenerator:
             if count > 0:
                 max_sev = "info"
                 for f in data["findings"]:
-                    s = str(f.get("severity", "info")).lower()
-                    if weights.get(s, 0) > weights.get(max_sev, 0): max_sev = s
-                status = f'<span class="text-{max_sev} font-black uppercase text-[10px]">Vulnerable ({count})</span>'
-                bg = "bg-red-500/5" if is_dark else "bg-red-50"
+                    s = self._normalize_severity(f.get("severity", "info"))
+                    if weights.get(s, 0) > weights.get(max_sev, 0):
+                        max_sev = s
+                sev_color = SEV_COLORS[max_sev]
+                status = f'<span style="color:{sev_color};font-weight:800;text-transform:uppercase;font-size:10px">VULNERABLE ({count})</span>'
+                row_bg = "background:rgba(255,0,60,0.04);"
             else:
-                status = f'<span class="{muted_color} text-[10px] font-bold uppercase">— No Findings</span>'
-                bg = ""
+                status = f'<span style="color:{COLORS["text_secondary"]};font-size:10px;font-weight:700">— NO FINDINGS</span>'
+                row_bg = ""
 
-            rows.append(f'''
-                <tr class="{bg} transition-colors">
-                    <td class="py-2.5 px-4 font-mono text-[10px] font-bold {title_color} opacity-60">{code}</td>
-                    <td class="py-2.5 px-4 text-[11px] font-bold {title_color}">{data["name"]}</td>
-                    <td class="py-2.5 px-4 text-center">{status}</td>
-                </tr>
-            ''')
-
-        return f"""
-        <section class="glass card mt-4 print-break">
-            <div class="flex items-center justify-between mb-6">
-                <div class="flex items-center gap-2">
-                    <div class="p-1.5 bg-indigo-600/10 rounded">
-                        <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-                        </svg>
-                    </div>
-                    <h2 class="text-xs font-black uppercase tracking-widest {title_color}">Industry Compliance Matrix</h2>
-                </div>
-                <div class="text-right">
-                    <div class="text-[9px] {muted_color} uppercase font-black tracking-widest leading-none">Risk Index</div>
-                    <div class="text-xl font-black mt-1" style="color: {risk_color}">{risk_pct}%</div>
-                </div>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left">
-                    <thead>
-                        <tr class="border-b {border_color}">
-                            <th class="py-2 px-4 text-[9px] {muted_color} uppercase font-black tracking-widest w-16">Code</th>
-                            <th class="py-2 px-4 text-[9px] {muted_color} uppercase font-black tracking-widest">OWASP Category</th>
-                            <th class="py-2 px-4 text-[9px] {muted_color} uppercase font-black tracking-widest text-center w-36">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y {border_color} opacity-90">
-                        {"".join(rows)}
-                    </tbody>
-                </table>
-            </div>
-        </section>
-        """
-
-    def _render_metrics(self, counts: Dict[str, int], duration: float, modules_count: int, findings_count: int, theme: str) -> str:
-        is_dark = theme == "dark"
-        muted_color = "text-gray-400" if is_dark else "text-slate-500"
-        title_color = "text-white" if is_dark else "text-slate-900"
-        
-        return f"""
-        <section class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-            <div class="glass card text-center border-b-2 border-b-critical py-4">
-                <div class="text-[9px] {muted_color} uppercase tracking-widest font-bold mb-0.5">Critical</div>
-                <div class="text-2xl font-black text-critical">{counts.get('critical', 0)}</div>
-            </div>
-            <div class="glass card text-center border-b-2 border-b-high py-4">
-                <div class="text-[9px] {muted_color} uppercase tracking-widest font-bold mb-0.5">High</div>
-                <div class="text-2xl font-black text-high">{counts.get('high', 0)}</div>
-            </div>
-            <div class="glass card text-center border-b-2 border-b-medium py-4">
-                <div class="text-[9px] {muted_color} uppercase tracking-widest font-bold mb-0.5">Medium</div>
-                <div class="text-2xl font-black text-medium">{counts.get('medium', 0)}</div>
-            </div>
-            <div class="glass card text-center border-b-2 border-b-low py-4">
-                <div class="text-[9px] {muted_color} uppercase tracking-widest font-bold mb-0.5">Low</div>
-                <div class="text-2xl font-black text-low">{counts.get('low', 0)}</div>
-            </div>
-            <div class="glass card text-center border-b-2 border-b-info py-4">
-                <div class="text-[9px] {muted_color} uppercase tracking-widest font-bold mb-0.5">Info</div>
-                <div class="text-2xl font-black text-info">{counts.get('info', 0)}</div>
-            </div>
-        </section>
-
-        <!-- Scan Stats -->
-        <section class="glass card mb-8">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                    <span class="block text-[9px] uppercase tracking-wider {muted_color} mb-1">Time Elapsed</span>
-                    <span class="font-bold text-sm {title_color}">{duration:.1f} seconds</span>
-                </div>
-                <div>
-                    <span class="block text-[9px] uppercase tracking-wider {muted_color} mb-1">Engines Run</span>
-                    <span class="font-bold text-sm {title_color}">{modules_count} modules active</span>
-                </div>
-                <div>
-                    <span class="block text-[9px] uppercase tracking-wider {muted_color} mb-1">Findings Density</span>
-                    <span class="font-bold text-sm {title_color}">{findings_count} security items</span>
-                </div>
-            </div>
-        </section>
-        """
-
-    def _render_attack_surface(self, attack_surface: Dict[str, Any], theme: str) -> str:
-        is_dark = theme == "dark"
-        title_color = "text-white" if is_dark else "text-slate-900"
-        muted_color = "text-gray-400" if is_dark else "text-slate-500"
-        desc_color = "text-gray-300" if is_dark else "text-slate-600"
-        border_color = "border-gray-800" if is_dark else "border-slate-200"
-
-        # Paths (from DirScanner)
-        paths = attack_surface.get("paths", [])
-        path_rows = []
-        for p in paths[:20]: # Limit to 20 for report brevity
-            status = p.get("status", 200)
-            status_color = "text-emerald-500" if status == 200 else "text-amber-500" if status in (403, 401) else "text-blue-500"
-            path_rows.append(f"""
-                <tr class="border-b {border_color} hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                    <td class="py-2 px-3 font-mono text-[10px] {title_color}">{html.escape(p.get('path', ''))}</td>
-                    <td class="py-2 px-3 text-[10px] font-bold {status_color}">{status}</td>
-                    <td class="py-2 px-3 text-[10px] {muted_color}">{html.escape(p.get('type', 'file'))}</td>
+            rows.append(f"""
+                <tr style="{row_bg}">
+                    <td class="owasp-code">{code}</td>
+                    <td class="owasp-name">{data["name"]}</td>
+                    <td class="owasp-status">{status}</td>
                 </tr>
             """)
-        
-        path_table = f"""
-            <div class="overflow-x-auto rounded border {border_color} mt-4">
-                <table class="w-full text-left">
-                    <thead class="bg-slate-50 dark:bg-slate-900/50">
-                        <tr class="border-b {border_color}">
-                            <th class="py-2 px-3 text-[9px] {muted_color} uppercase font-black tracking-widest">Discovered Path</th>
-                            <th class="py-2 px-3 text-[9px] {muted_color} uppercase font-black tracking-widest w-16">Status</th>
-                            <th class="py-2 px-3 text-[9px] {muted_color} uppercase font-black tracking-widest w-20">Type</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y {border_color}">
-                        {"".join(path_rows) if path_rows else f'<tr><td colspan="3" class="py-4 text-center text-[10px] {muted_color}">No paths discovered</td></tr>'}
-                    </tbody>
-                </table>
+
+        return f"""
+        <section class="cyber-card owasp-section">
+            <div class="section-header">
+                <div class="section-header-inline">
+                    <span class="section-icon">🛡️</span>
+                    <h2 class="section-label">INDUSTRY_COMPLIANCE_MATRIX</h2>
+                </div>
+                <div class="risk-index">
+                    <span class="risk-label">RISK_INDEX</span>
+                    <span class="risk-value" style="color:{risk_color}">{risk_pct}%</span>
+                    <span class="risk-tag" style="color:{risk_color}">{risk_label}</span>
+                </div>
             </div>
-            {f'<p class="mt-2 text-[9px] {muted_color} italic text-right">Showing first 20 of {len(paths)} discovered paths</p>' if len(paths) > 20 else ''}
+            <table class="owasp-table">
+                <thead>
+                    <tr>
+                        <th class="owasp-th">CODE</th>
+                        <th class="owasp-th">OWASP CATEGORY</th>
+                        <th class="owasp-th" style="text-align:center">STATUS</th>
+                    </tr>
+                </thead>
+                <tbody>{"".join(rows)}</tbody>
+            </table>
+        </section>
         """
 
-        # Form Inventory
+    def _render_attack_surface(self, attack_surface: Dict[str, Any]) -> str:
+        """Render the attack surface inventory section."""
+        # Paths
+        paths = attack_surface.get("paths", [])
+        path_rows = []
+        for p in paths[:20]:
+            status = p.get("status", 200)
+            if status == 200:
+                sc = COLORS["neon_green"]
+            elif status in (403, 401):
+                sc = COLORS["severity_high"]
+            else:
+                sc = COLORS["neon_blue"]
+
+            path_rows.append(f"""
+                <tr class="surface-row">
+                    <td class="surface-path">{html.escape(p.get('path', ''))}</td>
+                    <td class="surface-status" style="color:{sc}">{status}</td>
+                    <td class="surface-type">{html.escape(p.get('type', 'file'))}</td>
+                </tr>
+            """)
+
+        overflow_note = f'<p class="surface-overflow">Showing first 20 of {len(paths)} discovered paths</p>' if len(paths) > 20 else ""
+
+        # Forms
         forms = attack_surface.get("forms", [])
         form_cards = []
         for f in forms:
-            action = f.get("action", "")
             method = f.get("method", "GET").upper()
+            action = f.get("action", "")
             inputs = ", ".join(f.get("inputs", []))
             form_cards.append(f"""
-                <div class="p-3 rounded border {border_color} bg-slate-50/50 dark:bg-slate-900/20">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-[9px] font-black tracking-widest uppercase {muted_color}">Form Entry</span>
-                        <span class="px-1.5 py-0.5 rounded bg-brand-500 text-white text-[8px] font-bold">{method}</span>
+                <div class="form-card">
+                    <div class="form-header">
+                        <span class="form-label">FORM_ENTRY</span>
+                        <span class="form-method">{method}</span>
                     </div>
-                    <p class="text-[10px] font-mono {title_color} truncate mb-1">{html.escape(action)}</p>
-                    <p class="text-[9px] {muted_color} truncate">Inputs: <span class="text-brand-600 dark:text-brand-400 font-bold">{html.escape(inputs)}</span></p>
+                    <p class="form-action">{html.escape(action)}</p>
+                    <p class="form-inputs">Inputs: <span class="form-inputs-list">{html.escape(inputs)}</span></p>
                 </div>
             """)
 
-        form_section = f"""
-            <div class="mt-6">
-                <h3 class="text-[10px] font-black uppercase tracking-widest {muted_color} mb-3">Interactive Form Inventory</h3>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {"".join(form_cards) if form_cards else f'<div class="col-span-2 text-center py-4 border dashed {border_color} rounded text-[10px] {muted_color}">No interactive forms mapped</div>'}
-                </div>
-            </div>
-        """
+        no_forms = f'<div class="no-data">NO INTERACTIVE FORMS MAPPED</div>' if not form_cards else ""
 
         return f"""
-        <section class="glass card mt-8 print-break">
-            <div class="flex items-center gap-2 mb-6">
-                <div class="p-1.5 bg-brand-500/10 rounded">
-                    <svg class="w-4 h-4 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                    </svg>
-                </div>
-                <h2 class="text-xs font-black uppercase tracking-widest {title_color}">Attack Surface Inventory</h2>
+        <section class="cyber-card surface-section">
+            <div class="section-header-inline">
+                <span class="section-icon">🗺️</span>
+                <h2 class="section-label">ATTACK_SURFACE_INVENTORY</h2>
             </div>
-            
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="surface-grid">
                 <div>
-                    <h3 class="text-[10px] font-black uppercase tracking-widest {muted_color} mb-1">Directory Infrastructure</h3>
-                    <p class="text-[10px] {desc_color} mb-4">Baseline mapping of server structure and file availability.</p>
-                    {path_table}
+                    <h3 class="subsection-label">DIRECTORY_INFRASTRUCTURE</h3>
+                    <p class="subsection-desc">Baseline mapping of server structure.</p>
+                    <table class="surface-table">
+                        <thead>
+                            <tr>
+                                <th class="surface-th">DISCOVERED_PATH</th>
+                                <th class="surface-th">STATUS</th>
+                                <th class="surface-th">TYPE</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {"".join(path_rows) if path_rows else '<tr><td colspan="3" class="no-data">NO PATHS DISCOVERED</td></tr>'}
+                        </tbody>
+                    </table>
+                    {overflow_note}
                 </div>
                 <div>
-                    <h3 class="text-[10px] font-black uppercase tracking-widest {muted_color} mb-1">Application Components</h3>
-                    <p class="text-[10px] {desc_color} mb-4">Mapped entry points, external resources, and input vectors.</p>
-                    
-                    <div class="grid grid-cols-2 gap-4 mt-4">
-                        <div class="p-3 rounded border {border_color}">
-                            <span class="block text-[9px] uppercase tracking-wider {muted_color} mb-1">Internal Assets</span>
-                            <span class="font-bold text-sm {title_color}">{len(attack_surface.get('internal_urls', []))} URLs</span>
+                    <h3 class="subsection-label">APPLICATION_COMPONENTS</h3>
+                    <p class="subsection-desc">Mapped entry points, resources & input vectors.</p>
+                    <div class="surface-stats">
+                        <div class="surface-stat-card">
+                            <span class="surface-stat-label">INTERNAL_ASSETS</span>
+                            <span class="surface-stat-value">{len(attack_surface.get('internal_urls', []))} URLs</span>
                         </div>
-                        <div class="p-3 rounded border {border_color}">
-                            <span class="block text-[9px] uppercase tracking-wider {muted_color} mb-1">External Links</span>
-                            <span class="font-bold text-sm {title_color}">{len(attack_surface.get('external_urls', []))} Assets</span>
+                        <div class="surface-stat-card">
+                            <span class="surface-stat-label">EXTERNAL_LINKS</span>
+                            <span class="surface-stat-value">{len(attack_surface.get('external_urls', []))} Assets</span>
                         </div>
                     </div>
-                    
-                    {form_section}
+                    <h3 class="subsection-label" style="margin-top:1.5rem">FORM_INVENTORY</h3>
+                    <div class="forms-grid">
+                        {"".join(form_cards)}{no_forms}
+                    </div>
                 </div>
             </div>
         </section>
         """
 
-    def _get_css(self, theme: str) -> str:
-        is_dark = theme == "dark"
+    def _get_css(self) -> str:
+        """Return the full VIPER cyberpunk stylesheet."""
+        c = COLORS
         return f"""
-            :root {{
-                --critical: #ef4444;
-                --high: #f97316;
-                --medium: #eab308;
-                --low: #22c55e;
-                --info: #3b82f6;
-                --brand: #0ea5e9;
+            /* ═══ RESET & BASE ═══ */
+            *, *::before, *::after {{ margin: 0; padding: 0; box-sizing: border-box; }}
+
+            body {{
+                font-family: 'Inter', system-ui, sans-serif;
+                background: {c['bg_app']};
+                color: {c['text_primary']};
+                -webkit-font-smoothing: antialiased;
+                line-height: 1.6;
+                overflow-x: hidden;
             }}
-            body {{ font-family: 'Plus Jakarta Sans', sans-serif; background-color: {"#030712" if is_dark else "#fdfdfd"}; }}
-            .bg-page {{ background-color: {"#030712" if is_dark else "#fdfdfd"}; }}
-            .glass {{
-                backdrop-filter: blur(12px);
-                background: {"rgba(17, 24, 39, 0.7)" if is_dark else "rgba(255, 255, 255, 0.8)"};
+
+            /* ═══ CRT SCANLINE & GRID ═══ */
+            .crt-overlay {{
+                position: fixed; inset: 0; z-index: 9998; pointer-events: none; opacity: 0.08;
+                background: linear-gradient(to bottom, rgba(18,16,16,0) 50%, rgba(0,0,0,0.1) 50%);
+                background-size: 100% 4px;
             }}
-            .card {{
-                border: 1px solid {"rgba(255, 255, 255, 0.05)" if is_dark else "#e2e8f0"};
+            .cyber-grid {{
+                position: fixed; inset: 0; z-index: 9997; pointer-events: none; opacity: 0.5;
+                background-image:
+                    linear-gradient(rgba(0,243,255,0.015) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0,243,255,0.015) 1px, transparent 1px);
+                background-size: 40px 40px;
+            }}
+
+            /* ═══ CONTAINER ═══ */
+            .report-container {{
+                max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem; position: relative; z-index: 1;
+            }}
+
+            /* ═══ CYBER CARD (glassmorphism) ═══ */
+            .cyber-card {{
+                background: {c['bg_element']};
+                border: 1px solid {c['border_cyber']};
                 border-radius: 12px;
                 padding: 1.5rem;
-                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 24px 48px -12px rgba(0, 0, 0, 0.05);
+                backdrop-filter: blur(12px);
+                box-shadow: 0 0 20px rgba(0,243,255,0.03), 0 4px 24px rgba(0,0,0,0.3);
+                margin-bottom: 1rem;
             }}
-            .text-critical {{ color: var(--critical); }}
-            .text-high {{ color: var(--high); }}
-            .text-medium {{ color: var(--medium); }}
-            .text-low {{ color: var(--low); }}
-            .text-info {{ color: var(--info); }}
-            .border-critical {{ border-color: var(--critical); }}
-            .border-high {{ border-color: var(--high); }}
-            .border-medium {{ border-color: var(--medium); }}
-            .border-low {{ border-color: var(--low); }}
-            .border-info {{ border-color: var(--info); }}
-            .bg-critical {{ background-color: var(--critical); }}
-            .bg-high {{ background-color: var(--high); }}
-            .bg-medium {{ background-color: var(--medium); }}
-            .bg-low {{ background-color: var(--low); }}
-            .bg-info {{ background-color: var(--info); }}
+            .cyber-card:hover {{
+                border-color: {c['border_cyber_hover']};
+                box-shadow: 0 0 30px rgba(0,243,255,0.06), 0 4px 24px rgba(0,0,0,0.4);
+            }}
+
+            /* ═══ HEADER ═══ */
+            .report-header {{
+                display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 1.5rem;
+                margin-bottom: 2rem; padding-bottom: 2rem;
+                border-bottom: 1px solid {c['border_cyber']};
+            }}
+            .header-left {{ flex: 1; min-width: 300px; }}
+            .header-right {{ display: flex; align-items: center; gap: 1.5rem; flex-shrink: 0; }}
+
+            .brand-row {{ display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }}
+            .brand-badge {{
+                display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 9px;
+                font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; text-transform: uppercase;
+                background: linear-gradient(135deg, {c['neon_cyan']}, {c['neon_blue']});
+                color: {c['bg_app']}; box-shadow: 0 0 12px rgba(0,243,255,0.3);
+            }}
+            .brand-version {{ font-size: 10px; color: {c['text_secondary']}; font-family: 'JetBrains Mono', monospace; letter-spacing: 1px; }}
+
+            .report-title {{
+                font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 800;
+                letter-spacing: 3px; color: {c['text_primary']}; line-height: 1.2;
+            }}
+            .title-accent {{ color: {c['neon_cyan']}; text-shadow: 0 0 20px rgba(0,243,255,0.3); }}
+
+            .target-row, .modules-row {{ display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }}
+            .target-label {{
+                font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+                color: {c['text_secondary']}; letter-spacing: 2px;
+            }}
+            .target-url {{
+                font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 500;
+                color: {c['neon_cyan']}; background: rgba(0,243,255,0.06); padding: 2px 8px;
+                border-radius: 4px; border: 1px solid rgba(0,243,255,0.15);
+            }}
+
+            .mod-badge {{
+                display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 9px;
+                font-family: 'JetBrains Mono', monospace; font-weight: 600; letter-spacing: 0.5px;
+                background: {c['bg_card']}; border: 1px solid {c['border_cyber']}; color: {c['text_secondary']};
+            }}
+
+            .header-stat {{ text-align: right; }}
+            .stat-label {{
+                display: block; font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']}; text-transform: uppercase; margin-bottom: 2px;
+            }}
+            .stat-value {{
+                font-size: 13px; font-weight: 700; color: {c['text_primary']};
+                font-family: 'JetBrains Mono', monospace;
+            }}
+
+            .findings-count-box {{
+                display: flex; flex-direction: column; align-items: center; justify-content: center;
+                width: 56px; height: 56px; border-radius: 10px;
+                background: linear-gradient(135deg, {c['neon_cyan']}, {c['neon_blue']});
+                color: {c['bg_app']}; box-shadow: 0 0 20px rgba(0,243,255,0.25);
+            }}
+            .findings-count-num {{ font-size: 18px; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1; }}
+            .findings-count-label {{ font-size: 7px; font-weight: 800; letter-spacing: 1.5px; }}
+
+            /* ═══ METRICS ═══ */
+            .metrics-grid {{
+                display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; margin-bottom: 1rem;
+            }}
+            .metric-card {{
+                background: {c['bg_element']}; border: 1px solid {c['border_cyber']}; border-radius: 10px;
+                padding: 1rem; text-align: center; backdrop-filter: blur(8px);
+            }}
+            .metric-label {{
+                display: block; font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+                letter-spacing: 2px; color: {c['text_secondary']}; margin-bottom: 4px;
+            }}
+            .metric-value {{ font-size: 1.8rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; }}
+
+            .stats-bar {{
+                display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;
+            }}
+            .stat-block-label {{
+                display: block; font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']}; margin-bottom: 4px;
+            }}
+            .stat-block-value {{ font-size: 13px; font-weight: 700; color: {c['text_primary']}; }}
+
+            /* ═══ CHARTS ═══ */
+            .charts-grid {{
+                display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1rem;
+            }}
+            .chart-container {{ position: relative; height: 180px; width: 100%; display: flex; justify-content: center; }}
+
+            /* ═══ SECTION LABELS ═══ */
+            .section-label {{
+                font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 3px; color: {c['text_primary']}; opacity: 0.7; text-transform: uppercase;
+            }}
+            .section-header {{
+                display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;
+                padding-bottom: 0.75rem; border-bottom: 1px solid {c['border_cyber']};
+            }}
+            .section-header-inline {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }}
+            .section-icon {{ font-size: 16px; }}
+            .subsection-label {{
+                font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']}; margin-bottom: 4px;
+            }}
+            .subsection-desc {{ font-size: 10px; color: {c['text_secondary']}; margin-bottom: 1rem; }}
+
+            /* ═══ AI SECTION ═══ */
+            .ai-section {{ position: relative; overflow: hidden; }}
+            .ai-accent-bar {{
+                position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+                background: linear-gradient(180deg, {c['neon_cyan']}, {c['neon_blue']});
+                border-radius: 2px;
+            }}
+            .ai-content {{
+                font-size: 12px; color: {c['text_secondary']}; line-height: 1.8; padding-left: 0.5rem;
+            }}
+            .ai-list-item {{ margin-left: 1rem; margin-bottom: 0.25rem; list-style: none; }}
+            .text-highlight {{ color: {c['text_primary']}; }}
+            .text-muted {{ color: {c['text_secondary']}; }}
+
+            /* ═══ FINDINGS ═══ */
+            .findings-section {{ margin-top: 1.5rem; }}
+            .findings-list {{ display: flex; flex-direction: column; gap: 0.75rem; }}
+            .findings-total-badge {{
+                font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 1px; padding: 4px 12px; border-radius: 20px;
+                background: rgba(0,243,255,0.1); color: {c['neon_cyan']}; border: 1px solid rgba(0,243,255,0.2);
+            }}
+
+            .finding-card {{
+                background: {c['bg_element']}; border: 1px solid {c['border_cyber']};
+                border-radius: 10px; padding: 1.25rem; backdrop-filter: blur(8px);
+                transition: border-color 0.2s, box-shadow 0.2s;
+            }}
+            .finding-card:hover {{
+                border-color: {c['border_cyber_hover']};
+                box-shadow: 0 0 15px rgba(0,243,255,0.05);
+            }}
+            .finding-header {{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; }}
+            .finding-header-left {{ flex: 1; min-width: 200px; }}
+            .finding-meta {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }}
+            .sev-badge {{
+                font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 1px; padding: 2px 8px; border-radius: 3px;
+                border: 1px solid; background: transparent; text-transform: uppercase;
+            }}
+            .scanner-label {{
+                font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+                color: {c['text_secondary']}; letter-spacing: 1px; text-transform: uppercase;
+            }}
+            .finding-title {{ font-size: 13px; font-weight: 800; color: {c['text_primary']}; line-height: 1.4; }}
+            .finding-location {{
+                font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 600;
+                color: {c['neon_cyan']}; margin-top: 0.4rem; word-break: break-all;
+                background: rgba(0,243,255,0.05); display: inline-block;
+                padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(0,243,255,0.12);
+            }}
+            .finding-tags {{ display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; flex-shrink: 0; }}
+            .tag {{
+                font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+                padding: 2px 8px; border-radius: 3px; border: 1px solid {c['border_cyber']};
+            }}
+            .tag-cwe {{ background: {c['bg_card']}; color: {c['text_secondary']}; }}
+            .tag-owasp {{ background: rgba(0,243,255,0.05); color: {c['neon_cyan']}; border-color: rgba(0,243,255,0.15); }}
+            .tag-cvss {{
+                background: rgba(255,255,255,0.05); color: {c['text_primary']}; font-weight: 800;
+                border-color: rgba(255,255,255,0.1);
+            }}
+            .finding-desc {{
+                font-size: 12px; color: {c['text_secondary']}; line-height: 1.7; margin-top: 0.75rem;
+                padding-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.03);
+                max-width: 800px;
+            }}
+            .finding-evidence {{ margin-top: 1rem; }}
+            .evidence-label {{
+                font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']}; margin-bottom: 0.5rem;
+            }}
+            .evidence-code {{
+                background: rgba(0,0,0,0.4); color: {c['neon_green']}; padding: 0.75rem;
+                border-radius: 8px; border: 1px solid rgba(0,255,159,0.1);
+                font-family: 'JetBrains Mono', monospace; font-size: 11px;
+                line-height: 1.6; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+            }}
+            .finding-remediation {{
+                margin-top: 1rem; background: rgba(0,255,159,0.03); padding: 0.75rem;
+                border-radius: 8px; border: 1px solid rgba(0,255,159,0.08);
+            }}
+            .remediation-label {{
+                font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['neon_green']}; margin-bottom: 0.3rem;
+            }}
+            .remediation-text {{ font-size: 12px; color: {c['text_secondary']}; line-height: 1.7; }}
+
+            /* ═══ OWASP TABLE ═══ */
+            .owasp-section {{ margin-top: 0.5rem; }}
+            .risk-index {{ text-align: right; }}
+            .risk-label {{
+                display: block; font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']};
+            }}
+            .risk-value {{ font-size: 1.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; }}
+            .risk-tag {{ display: block; font-size: 8px; font-weight: 800; letter-spacing: 1px; }}
+            .owasp-table {{ width: 100%; border-collapse: collapse; margin-top: 0.5rem; }}
+            .owasp-th {{
+                font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']}; padding: 0.6rem 0.75rem;
+                text-align: left; border-bottom: 1px solid {c['border_cyber']};
+            }}
+            .owasp-code {{
+                padding: 0.5rem 0.75rem; font-family: 'JetBrains Mono', monospace; font-size: 10px;
+                font-weight: 700; color: {c['text_primary']}; opacity: 0.6; border-bottom: 1px solid rgba(255,255,255,0.02);
+            }}
+            .owasp-name {{
+                padding: 0.5rem 0.75rem; font-size: 11px; font-weight: 700; color: {c['text_primary']};
+                border-bottom: 1px solid rgba(255,255,255,0.02);
+            }}
+            .owasp-status {{ padding: 0.5rem 0.75rem; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.02); }}
+
+            /* ═══ ATTACK SURFACE ═══ */
+            .surface-section {{ margin-top: 0.5rem; }}
+            .surface-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1rem; }}
+            .surface-table {{ width: 100%; border-collapse: collapse; border: 1px solid {c['border_cyber']}; border-radius: 8px; overflow: hidden; }}
+            .surface-th {{
+                font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']}; padding: 0.5rem 0.75rem;
+                text-align: left; background: rgba(0,0,0,0.3); border-bottom: 1px solid {c['border_cyber']};
+            }}
+            .surface-row {{ border-bottom: 1px solid rgba(255,255,255,0.02); }}
+            .surface-row:hover {{ background: rgba(0,243,255,0.02); }}
+            .surface-path {{
+                padding: 0.4rem 0.75rem; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: {c['text_primary']};
+            }}
+            .surface-status {{
+                padding: 0.4rem 0.75rem; font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono', monospace;
+            }}
+            .surface-type {{ padding: 0.4rem 0.75rem; font-size: 10px; color: {c['text_secondary']}; }}
+            .surface-overflow {{
+                margin-top: 0.5rem; font-size: 9px; color: {c['text_secondary']};
+                text-align: right; font-style: italic;
+            }}
+            .surface-stats {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1rem; }}
+            .surface-stat-card {{
+                padding: 0.75rem; border-radius: 8px; border: 1px solid {c['border_cyber']};
+                background: {c['bg_card']};
+            }}
+            .surface-stat-label {{
+                display: block; font-size: 8px; font-family: 'JetBrains Mono', monospace;
+                font-weight: 800; letter-spacing: 2px; color: {c['text_secondary']}; margin-bottom: 4px;
+            }}
+            .surface-stat-value {{ font-size: 13px; font-weight: 700; color: {c['text_primary']}; }}
+            .forms-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }}
+            .form-card {{
+                padding: 0.75rem; border-radius: 8px; border: 1px solid {c['border_cyber']};
+                background: {c['bg_card']};
+            }}
+            .form-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }}
+            .form-label {{
+                font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 2px; color: {c['text_secondary']};
+            }}
+            .form-method {{
+                font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 3px;
+                background: linear-gradient(135deg, {c['neon_cyan']}, {c['neon_blue']});
+                color: {c['bg_app']};
+            }}
+            .form-action {{
+                font-size: 10px; font-family: 'JetBrains Mono', monospace; color: {c['text_primary']};
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 0.25rem;
+            }}
+            .form-inputs {{ font-size: 9px; color: {c['text_secondary']}; }}
+            .form-inputs-list {{ color: {c['neon_cyan']}; font-weight: 700; }}
+
+            .no-data {{
+                text-align: center; padding: 1.5rem; font-size: 10px; font-family: 'JetBrains Mono', monospace;
+                font-weight: 700; letter-spacing: 2px; color: {c['text_secondary']}; opacity: 0.5;
+                border: 1px dashed {c['border_cyber']}; border-radius: 8px;
+            }}
+
+            /* ═══ FOOTER ═══ */
+            .report-footer {{
+                margin-top: 3rem; text-align: center; padding-top: 1.5rem;
+            }}
+            .footer-line {{
+                height: 1px; margin-bottom: 1.5rem;
+                background: linear-gradient(90deg, transparent, {c['border_cyber']}, transparent);
+            }}
+            .footer-brand {{
+                font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
+                letter-spacing: 3px; color: {c['text_secondary']}; opacity: 0.6;
+            }}
+            .footer-id {{
+                margin-top: 0.5rem; font-size: 9px; font-family: 'JetBrains Mono', monospace;
+                color: {c['text_secondary']}; opacity: 0.3; letter-spacing: 0.5px;
+            }}
+
+            /* ═══ PRINT ═══ */
             @media print {{
-                .print-break {{ page-break-inside: avoid; }}
-                body {{ background: white !important; }}
-                .glass {{ backdrop-filter: none !important; background: white !important; border: 1px solid #eee !important; }}
-                .card {{ box-shadow: none !important; }}
+                .crt-overlay, .cyber-grid {{ display: none !important; }}
+                body {{ background: #0a0a12 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+                .cyber-card, .finding-card, .metric-card {{ break-inside: avoid; box-shadow: none !important; }}
             }}
-            ::-webkit-scrollbar {{ width: 8px; }}
+
+            /* ═══ RESPONSIVE ═══ */
+            @media (max-width: 768px) {{
+                .report-header {{ flex-direction: column; }}
+                .metrics-grid {{ grid-template-columns: repeat(3, 1fr); }}
+                .charts-grid {{ grid-template-columns: 1fr; }}
+                .surface-grid {{ grid-template-columns: 1fr; }}
+                .stats-bar {{ grid-template-columns: 1fr; }}
+                .forms-grid {{ grid-template-columns: 1fr; }}
+            }}
+            @media (max-width: 480px) {{
+                .metrics-grid {{ grid-template-columns: repeat(2, 1fr); }}
+                .report-title {{ font-size: 1.2rem; letter-spacing: 1.5px; }}
+            }}
+
+            /* ═══ SCROLLBAR ═══ */
+            ::-webkit-scrollbar {{ width: 6px; }}
             ::-webkit-scrollbar-track {{ background: transparent; }}
-            ::-webkit-scrollbar-thumb {{ background: {"#374151" if is_dark else "#e2e8f0"}; border-radius: 4px; }}
+            ::-webkit-scrollbar-thumb {{ background: rgba(0,243,255,0.15); border-radius: 3px; }}
+            ::-webkit-scrollbar-thumb:hover {{ background: rgba(0,243,255,0.3); }}
         """
-
-

@@ -17,7 +17,7 @@ export default function SettingsPage() {
     const handleSave = () => {
         // Store in localStorage for now
         if (typeof window !== "undefined") {
-            localStorage.setItem("vaptx_settings", JSON.stringify(settings));
+            localStorage.setItem("securesuitex_settings", JSON.stringify(settings));
         }
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);

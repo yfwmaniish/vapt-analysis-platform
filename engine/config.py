@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 # ─── Project Metadata ───────────────────────────────────────────
-PROJECT_NAME = "VAPTx"
+PROJECT_NAME = "SecureSuiteX"
 PROJECT_VERSION = "1.0.0"
 PROJECT_DESCRIPTION = "AI-Powered VAPT Security Platform"
 
@@ -35,7 +35,7 @@ DEFAULT_USER_AGENT = f"{PROJECT_NAME}/{PROJECT_VERSION}"
 
 # ─── Docker Sandbox ───────────────────────────────────────────
 DOCKER_ENABLED = os.getenv("DOCKER_ENABLED", "true").lower() == "true"
-DOCKER_IMAGE = os.getenv("DOCKER_IMAGE", "vaptx-sandbox:latest")
+DOCKER_IMAGE = os.getenv("DOCKER_IMAGE", "securesuitex-sandbox:latest")
 
 # ─── Server ───────────────────────────────────────────────────
 HOST = os.getenv("HOST", "0.0.0.0")

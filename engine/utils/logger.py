@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timezone
 
 
-def get_logger(name: str = "vaptx") -> logging.Logger:
+def get_logger(name: str = "securesuitex") -> logging.Logger:
     """Create a configured logger instance."""
     logger = logging.getLogger(name)
 

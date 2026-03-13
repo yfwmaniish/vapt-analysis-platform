@@ -55,6 +55,7 @@ async def _run_scan_task(scan_id: str, request: ScanRequest):
             ai_analysis=request.ai_analysis,
             jwt_token=request.jwt_token or "",
             auth_header=request.auth_header or "",
+            vortex_categories=request.vortex_categories,
         )
         _scans[scan_id] = result
     except Exception as exc:
@@ -164,3 +165,15 @@ async def get_scan_progress(scan_id: str):
 async def list_scanners():
     """List all available scanner modules."""
     return ScannerRegistry.get_info()
+
+
+# ── Vortex Payload Categories ─────────────────────────────────────────────
+
+vortex_router = APIRouter(prefix="/api/vortex", tags=["Vortex"])
+
+
+@vortex_router.get("/categories")
+async def list_vortex_categories():
+    """List all available Vortex vulnerability payload categories."""
+    from engine.scanners.vortex_scanner import PayloadLoader
+    return PayloadLoader.discover_categories()

@@ -40,6 +40,7 @@ class ScanModule(str, Enum):
     FINGERPRINT = "fingerprint"
     CORS = "cors"
     REDIRECT = "redirect"
+    VORTEX = "vortex"
 
 class ScanRequest(BaseModel):
     target: str = Field(..., description="Target domain, IP, or URL to scan")
@@ -49,6 +50,7 @@ class ScanRequest(BaseModel):
     )
     jwt_token: Optional[str] = Field(None, description="JWT token for JWT analysis")
     auth_header: Optional[str] = Field(None, description="Global Authorization header (e.g., 'Bearer token') for authenticated scanning")
+    vortex_categories: Optional[List[str]] = Field(None, description="Vulnerability categories for Vortex deep scanner (e.g., 'SQL Injection', 'XSS Injection')")
     timeout: int = Field(default=10, ge=1, le=120, description="Timeout per request in seconds")
     threads: int = Field(default=50, ge=1, le=200, description="Max concurrent threads")
     ai_analysis: bool = Field(default=True, description="Enable AI-powered vulnerability analysis")

@@ -1,9 +1,9 @@
 /**
- * API service layer for the VAPTx dashboard.
+ * API service layer for the SecureSuiteX dashboard.
  * Handles all communication with the FastAPI backend.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 const WS_BASE = API_BASE.replace("http", "ws");
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -13,6 +13,7 @@ export interface ScanRequest {
     modules: string[];
     jwt_token?: string;
     auth_header?: string;
+    vortex_categories?: string[];
     timeout?: number;
     threads?: number;
     ai_analysis?: boolean;
@@ -96,6 +97,14 @@ export interface ScannerInfo {
     description: string;
 }
 
+export interface VortexCategory {
+    name: string;
+    payload_count: number;
+    severity: string;
+    cwe: string;
+    owasp: string;
+}
+
 /* ── API Methods ───────────────────────────────────────────── */
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -143,6 +152,10 @@ export async function healthCheck() {
         scanners_loaded: number;
         ai_available: boolean;
     }>("/health");
+}
+
+export async function getVortexCategories(): Promise<VortexCategory[]> {
+    return apiFetch<VortexCategory[]>("/api/vortex/categories");
 }
 
 /* ── WebSocket ─────────────────────────────────────────────── */

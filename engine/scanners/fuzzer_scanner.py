@@ -148,6 +148,36 @@ class FuzzerScanner(BaseScanner):
             
             # If the payload is reflected exactly without encoding
             if payload in text:
+                # To prevent false positives where safe payloads (e.g. javascript:alert) are reflected 
+                # inside HTML-encoded contexts, we inject a unique probe tag to confirm execution context.
+                probe = "<vltro_xss_probe>"
+                probe_text = ""
+                
+                try:
+                    if method == "GET":
+                        parsed = urlparse(url)
+                        params = parse_qsl(parsed.query)
+                        # Replace the payload string with our probe tag in the parameters
+                        new_params = [(k, v.replace(payload, probe)) for k, v in params]
+                        fuzzed_query = urlencode(new_params)
+                        probe_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fuzzed_query, parsed.fragment))
+                        
+                        async with session.get(probe_url, allow_redirects=True) as p_resp:
+                            probe_text = await p_resp.text()
+                    else:
+                        if data:
+                            probe_data = {k: v.replace(payload, probe) if isinstance(v, str) else v for k, v in data.items()}
+                            async with session.post(url, data=probe_data, allow_redirects=True) as p_resp:
+                                probe_text = await p_resp.text()
+                except Exception:
+                    pass
+
+                # If the probe tag is nowhere in the response text, it means it was stripped, 
+                # URL-encoded (in an attribute), or HTML-encoded properly. 
+                # This ensures we don't flag non-HTML contexts like URL attributes as false positives.
+                if probe not in probe_text:
+                    return None
+                    
                 return Finding(
                     scanner=self.name,
                     type="Cross-Site Scripting (Reflected)",
@@ -225,7 +255,8 @@ class FuzzerScanner(BaseScanner):
 
     async def scan(self, target: str, **kwargs: Any) -> tuple[list[Finding], Any] | list[Finding]:
         attack_surface = kwargs.get("attack_surface", {})
-        findings = []
+        findings: list[Finding] = []
+        seen: set[str] = set()
 
         if not attack_surface:
             self.report_progress(100.0, "No attack surface data provided. Run crawler first.")
@@ -237,11 +268,11 @@ class FuzzerScanner(BaseScanner):
 
         # Filter URLs to only those with query parameters
         param_urls = [u for u in urls_to_test if "?" in u]
-        
-        # Hard limits to prevent fuzzing from taking hours on massive commercial sites
-        param_urls = param_urls[:20]
-        forms_to_test = forms_to_test[:10]
-        
+
+        # Cap to prevent excessive fuzzing
+        param_urls = param_urls[:30]
+        forms_to_test = forms_to_test[:15]
+
         total_tests = len(param_urls) + len(forms_to_test)
         if total_tests == 0:
             self.report_progress(100.0, "No inputs or parameters found to fuzz.")
@@ -250,73 +281,110 @@ class FuzzerScanner(BaseScanner):
         self.report_progress(5.0, f"Fuzzing {len(param_urls)} parameterized URLs and {len(forms_to_test)} forms")
 
         tested_count = 0
+        semaphore = asyncio.Semaphore(20)
+
+        def _dedup_add(finding: Finding | None) -> bool:
+            """Add finding if unique. Returns True if added."""
+            if finding is None:
+                return False
+            key = f"{finding.title}-{finding.location}"
+            if key in seen:
+                return False
+            seen.add(key)
+            findings.append(finding)
+            return True
+
+        async def _limited(coro):
+            """Run a coroutine under the semaphore."""
+            async with semaphore:
+                return await coro
 
         async with aiohttp.ClientSession(timeout=timeout_val, headers={"User-Agent": "Veltro-Fuzzer/1.0"}) as session:
-            
-            # 1. Fuzz URLs with query parameters
+
+            # ── 1. Fuzz URLs with query parameters (concurrent per vuln type) ──
             for url in param_urls:
                 parsed = urlparse(url)
                 params = parse_qsl(parsed.query)
-                
-                # Fuzz each parameter with each payload
-                for i, (key, value) in enumerate(params):
+
+                for i, (key, _value) in enumerate(params):
+
+                    # SQLi — run all payloads concurrently, short-circuit on first hit
+                    sqli_tasks = []
                     for sqli in SQLI_PAYLOADS:
-                        fuzzed_params = params.copy()
-                        fuzzed_params[i] = (key, sqli) # Replace value with payload
-                        fuzzed_query = urlencode(fuzzed_params)
-                        fuzzed_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fuzzed_query, parsed.fragment))
-                        
-                        finding = await self._test_sqli(session, fuzzed_url, "GET")
-                        if finding:
-                            findings.append(finding)
-                            break # Stop testing this param for SQLi if one works
-                    
+                        fp = params.copy()
+                        fp[i] = (key, sqli)
+                        fq = urlencode(fp)
+                        fu = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fq, parsed.fragment))
+                        sqli_tasks.append(_limited(self._test_sqli(session, fu, "GET")))
+
+                    for result in await asyncio.gather(*sqli_tasks, return_exceptions=True):
+                        if not isinstance(result, Exception):
+                            _dedup_add(result)
+
+                    # Blind SQLi — concurrent
+                    blind_tasks = []
+                    for bsql in SQLI_BLIND_PAYLOADS:
+                        fp = params.copy()
+                        fp[i] = (key, bsql)
+                        fq = urlencode(fp)
+                        fu = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fq, parsed.fragment))
+                        blind_tasks.append(_limited(self._test_sqli(session, fu, "GET")))
+
+                    for result in await asyncio.gather(*blind_tasks, return_exceptions=True):
+                        if not isinstance(result, Exception):
+                            _dedup_add(result)
+
+                    # XSS — concurrent
+                    xss_tasks = []
                     for xss in XSS_PAYLOADS + XSS_POLYGLOT_PAYLOADS:
-                        fuzzed_params = params.copy()
-                        fuzzed_params[i] = (key, xss)
-                        fuzzed_query = urlencode(fuzzed_params)
-                        fuzzed_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fuzzed_query, parsed.fragment))
-                        
-                        finding = await self._test_xss(session, fuzzed_url, xss, "GET")
-                        if finding:
-                            findings.append(finding)
-                            break
+                        fp = params.copy()
+                        fp[i] = (key, xss)
+                        fq = urlencode(fp)
+                        fu = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fq, parsed.fragment))
+                        xss_tasks.append(_limited(self._test_xss(session, fu, xss, "GET")))
 
-                    # Test SSTI
+                    for result in await asyncio.gather(*xss_tasks, return_exceptions=True):
+                        if not isinstance(result, Exception):
+                            _dedup_add(result)
+
+                    # SSTI — concurrent
+                    ssti_tasks = []
                     for ssti in SSTI_PAYLOADS:
-                        fuzzed_params = params.copy()
-                        fuzzed_params[i] = (key, ssti)
-                        fuzzed_query = urlencode(fuzzed_params)
-                        fuzzed_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fuzzed_query, parsed.fragment))
+                        fp = params.copy()
+                        fp[i] = (key, ssti)
+                        fq = urlencode(fp)
+                        fu = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fq, parsed.fragment))
+                        ssti_tasks.append(_limited(self._test_ssti(session, fu, ssti, "GET")))
 
-                        finding = await self._test_ssti(session, fuzzed_url, ssti, "GET")
-                        if finding:
-                            findings.append(finding)
-                            break
+                    for result in await asyncio.gather(*ssti_tasks, return_exceptions=True):
+                        if not isinstance(result, Exception):
+                            _dedup_add(result)
 
-                    # Test Command Injection
+                    # Command Injection — concurrent
+                    cmdi_tasks = []
                     for cmdi in CMDI_PAYLOADS:
-                        fuzzed_params = params.copy()
-                        fuzzed_params[i] = (key, cmdi)
-                        fuzzed_query = urlencode(fuzzed_params)
-                        fuzzed_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fuzzed_query, parsed.fragment))
+                        fp = params.copy()
+                        fp[i] = (key, cmdi)
+                        fq = urlencode(fp)
+                        fu = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fq, parsed.fragment))
+                        cmdi_tasks.append(_limited(self._test_cmdi(session, fu, "GET")))
 
-                        finding = await self._test_cmdi(session, fuzzed_url, "GET")
-                        if finding:
-                            findings.append(finding)
-                            break
-                    
+                    for result in await asyncio.gather(*cmdi_tasks, return_exceptions=True):
+                        if not isinstance(result, Exception):
+                            _dedup_add(result)
+
                 tested_count += 1
                 if total_tests > 0:
-                    self.report_progress(5.0 + (tested_count / total_tests * 90.0), "Fuzzing URL parameters")
+                    self.report_progress(5.0 + (tested_count / total_tests * 90.0), f"Fuzzing URLs ({len(findings)} findings)")
 
-            # 2. Fuzz Forms
+            # ── 2. Fuzz Forms (concurrent per vuln type) ──
             for form in forms_to_test:
                 action = form.get("action")
                 method = form.get("method", "GET").upper()
                 inputs = form.get("inputs", [])
-                
+
                 if not action or not inputs:
+                    tested_count += 1
                     continue
 
                 for inp in inputs:
@@ -324,58 +392,46 @@ class FuzzerScanner(BaseScanner):
                     if not name:
                         continue
 
-                    # Create base form data with dummy values
-                    base_data = {i.get("name"): "test" for i in inputs if i.get("name")}
-                    
-                    # Test SQLi
-                    for sqli in SQLI_PAYLOADS:
-                        test_data = base_data.copy()
-                        test_data[name] = sqli
-                        
-                        fuzzed_url = action
-                        if method == "GET":
-                            parsed = urlparse(action)
-                            fuzzed_query = urlencode(test_data)
-                            fuzzed_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fuzzed_query, parsed.fragment))
-                            finding = await self._test_sqli(session, fuzzed_url, "GET")
-                        else:
-                            finding = await self._test_sqli(session, fuzzed_url, "POST", data=test_data)
-                            
-                        if finding:
-                            findings.append(finding)
-                            break
+                    base_data = {it.get("name"): "test" for it in inputs if it.get("name")}
 
-                    # Test XSS
-                    for xss in XSS_PAYLOADS:
-                        test_data = base_data.copy()
-                        test_data[name] = xss
-                        
-                        fuzzed_url = action
+                    # SQLi forms — concurrent
+                    sqli_form_tasks = []
+                    for sqli in SQLI_PAYLOADS:
+                        td = base_data.copy()
+                        td[name] = sqli
                         if method == "GET":
-                            parsed = urlparse(action)
-                            fuzzed_query = urlencode(test_data)
-                            fuzzed_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, fuzzed_query, parsed.fragment))
-                            finding = await self._test_xss(session, fuzzed_url, xss, "GET")
+                            p = urlparse(action)
+                            fq = urlencode(td)
+                            fu = urlunparse((p.scheme, p.netloc, p.path, p.params, fq, p.fragment))
+                            sqli_form_tasks.append(_limited(self._test_sqli(session, fu, "GET")))
                         else:
-                            finding = await self._test_xss(session, fuzzed_url, xss, "POST", data=test_data)
-                            
-                        if finding:
-                            findings.append(finding)
-                            break
+                            sqli_form_tasks.append(_limited(self._test_sqli(session, action, "POST", data=td)))
+
+                    for result in await asyncio.gather(*sqli_form_tasks, return_exceptions=True):
+                        if not isinstance(result, Exception):
+                            _dedup_add(result)
+
+                    # XSS forms — concurrent
+                    xss_form_tasks = []
+                    for xss in XSS_PAYLOADS:
+                        td = base_data.copy()
+                        td[name] = xss
+                        if method == "GET":
+                            p = urlparse(action)
+                            fq = urlencode(td)
+                            fu = urlunparse((p.scheme, p.netloc, p.path, p.params, fq, p.fragment))
+                            xss_form_tasks.append(_limited(self._test_xss(session, fu, xss, "GET")))
+                        else:
+                            xss_form_tasks.append(_limited(self._test_xss(session, action, xss, "POST", data=td)))
+
+                    for result in await asyncio.gather(*xss_form_tasks, return_exceptions=True):
+                        if not isinstance(result, Exception):
+                            _dedup_add(result)
 
                 tested_count += 1
                 if total_tests > 0:
-                    self.report_progress(5.0 + (tested_count / total_tests * 90.0), "Fuzzing forms")
+                    self.report_progress(5.0 + (tested_count / total_tests * 90.0), f"Fuzzing forms ({len(findings)} findings)")
 
-        self.report_progress(100.0, "Fuzzing complete")
-        
-        # Deduplicate findings based on title and location
-        unique_findings = []
-        seen = set()
-        for f in findings:
-            key = f"{f.title}-{f.location}"
-            if key not in seen:
-                seen.add(key)
-                unique_findings.append(f)
+        self.report_progress(100.0, f"Fuzzing complete: {len(findings)} findings")
+        return findings
 
-        return unique_findings

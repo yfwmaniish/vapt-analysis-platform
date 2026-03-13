@@ -48,8 +48,8 @@ class LLMService:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://vaptx.local",
-            "X-Title": "VAPTx Security Scanner",
+            "HTTP-Referer": "https://securesuitex.local",
+            "X-Title": "SecureSuiteX Security Scanner",
         }
 
         messages = []

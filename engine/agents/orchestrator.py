@@ -42,6 +42,7 @@ MODULE_TO_SCANNER = {
     ScanModule.FINGERPRINT: "fingerprint",
     ScanModule.CORS: "cors",
     ScanModule.REDIRECT: "redirect",
+    ScanModule.VORTEX: "vortex",
 }
 
 # Progress callback type
@@ -79,6 +80,7 @@ class ScanOrchestrator:
         ai_analysis: bool = True,
         jwt_token: str = "",
         auth_header: str = "",
+        vortex_categories: Optional[List[str]] = None,
     ) -> ScanResult:
         """
         Execute a full scan with the requested modules.
@@ -91,7 +93,7 @@ class ScanOrchestrator:
         logger.info(f"[{scan_id[:8]}] Starting scan of {target} with {len(modules)} modules")
 
         # Define attack modules that must run in Phase 2
-        ATTACK_MODULES = {"fuzzer", "browser", "ssrf", "xxe", "cors", "redirect"}
+        ATTACK_MODULES = {"fuzzer", "browser", "ssrf", "xxe", "cors", "redirect", "vortex"}
 
         # Create scanner instances
         discovery_scanners = []
@@ -158,6 +160,8 @@ class ScanOrchestrator:
                 kwargs["jwt_token"] = jwt_token
             if auth_header:
                 kwargs["auth_header"] = auth_header
+            if name == "vortex" and vortex_categories:
+                kwargs["vortex_categories"] = vortex_categories
             if surface_data:
                 kwargs["attack_surface"] = surface_data
 
